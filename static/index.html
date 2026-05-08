@@ -1,0 +1,882 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AutoLabel — Smart Dataset Creator</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:        #0d0f14;
+  --surface:   #13161e;
+  --panel:     #181c26;
+  --border:    #252a38;
+  --border2:   #2f3547;
+  --accent:    #4f8ef7;
+  --accent2:   #7c4dff;
+  --green:     #22d38a;
+  --yellow:    #f5c842;
+  --red:       #ff5c6a;
+  --text:      #e8eaf0;
+  --muted:     #7a82a0;
+  --mono:      'Space Mono', monospace;
+  --sans:      'DM Sans', sans-serif;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; background: var(--bg); color: var(--text); font-family: var(--sans); overflow: hidden; }
+
+/* ── Layout ── */
+.app { display: grid; grid-template-rows: 52px 1fr; height: 100vh; }
+.topbar {
+  display: flex; align-items: center; gap: 12px; padding: 0 20px;
+  background: var(--surface); border-bottom: 1px solid var(--border);
+  z-index: 10;
+}
+.logo { font-family: var(--mono); font-size: 15px; font-weight: 700; color: var(--accent); letter-spacing: -0.5px; }
+.logo span { color: var(--green); }
+.topbar-sep { width: 1px; height: 24px; background: var(--border2); margin: 0 4px; }
+.topbar-stat { font-size: 12px; color: var(--muted); font-family: var(--mono); }
+.topbar-stat b { color: var(--text); }
+.topbar-right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+
+.main { display: grid; grid-template-columns: 260px 1fr 280px; overflow: hidden; }
+
+/* ── Left panel ── */
+.left-panel {
+  background: var(--surface); border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.panel-header {
+  padding: 14px 16px 10px; font-family: var(--mono); font-size: 11px;
+  color: var(--muted); letter-spacing: 1.5px; text-transform: uppercase;
+  border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px;
+}
+.file-list { flex: 1; overflow-y: auto; padding: 8px; }
+.file-list::-webkit-scrollbar { width: 4px; }
+.file-list::-webkit-scrollbar-track { background: transparent; }
+.file-list::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+
+.file-item {
+  padding: 8px 10px; border-radius: 6px; cursor: pointer; margin-bottom: 4px;
+  display: flex; align-items: center; gap: 10px; transition: background .15s;
+  border: 1px solid transparent; position: relative;
+}
+.file-item:hover { background: var(--panel); }
+.file-item.active { background: rgba(79,142,247,.12); border-color: rgba(79,142,247,.3); }
+.file-thumb {
+  width: 40px; height: 34px; border-radius: 4px; object-fit: cover;
+  background: var(--border); flex-shrink: 0; border: 1px solid var(--border2);
+}
+.file-info { min-width: 0; flex: 1; }
+.file-name { font-size: 12px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.file-meta { font-size: 11px; color: var(--muted); margin-top: 2px; font-family: var(--mono); }
+.label-badge {
+  font-size: 10px; font-family: var(--mono); padding: 2px 6px; border-radius: 10px;
+  background: rgba(34,211,138,.15); color: var(--green); flex-shrink: 0;
+}
+.label-badge.zero { background: rgba(122,130,160,.1); color: var(--muted); }
+
+.upload-zone {
+  margin: 10px; border: 1.5px dashed var(--border2); border-radius: 8px;
+  padding: 18px 12px; text-align: center; cursor: pointer; transition: all .2s;
+}
+.upload-zone:hover, .upload-zone.drag { border-color: var(--accent); background: rgba(79,142,247,.05); }
+.upload-zone svg { margin-bottom: 6px; opacity: .5; }
+.upload-zone p { font-size: 12px; color: var(--muted); }
+.upload-zone p b { color: var(--text); }
+#file-input { display: none; }
+
+/* ── Canvas area ── */
+.canvas-area {
+  background: var(--bg); display: flex; flex-direction: column;
+  align-items: center; justify-content: center; position: relative; overflow: hidden;
+}
+.canvas-toolbar {
+  position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
+  display: flex; gap: 6px; background: var(--surface); border: 1px solid var(--border);
+  border-radius: 10px; padding: 5px; z-index: 5; box-shadow: 0 4px 20px rgba(0,0,0,.4);
+}
+.tool-btn {
+  padding: 6px 12px; border-radius: 7px; border: none; background: transparent;
+  color: var(--muted); font-size: 12px; font-family: var(--sans); cursor: pointer;
+  display: flex; align-items: center; gap: 6px; transition: all .15s; white-space: nowrap;
+}
+.tool-btn:hover { background: var(--panel); color: var(--text); }
+.tool-btn.active { background: rgba(79,142,247,.2); color: var(--accent); }
+.tool-btn svg { width: 14px; height: 14px; flex-shrink: 0; }
+
+.canvas-wrap {
+  position: relative; cursor: crosshair;
+  box-shadow: 0 0 0 1px var(--border), 0 8px 40px rgba(0,0,0,.6);
+  border-radius: 4px; overflow: hidden;
+}
+#main-canvas { display: block; }
+.canvas-placeholder {
+  display: flex; flex-direction: column; align-items: center; gap: 12px;
+  color: var(--muted); pointer-events: none;
+}
+.canvas-placeholder svg { opacity: .2; }
+.canvas-placeholder p { font-size: 14px; }
+
+.conf-bar {
+  position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 10px; background: var(--surface);
+  border: 1px solid var(--border); border-radius: 8px; padding: 7px 14px;
+  font-size: 12px; color: var(--muted); z-index: 5;
+}
+.conf-bar input[type=range] {
+  width: 110px; accent-color: var(--accent); cursor: pointer;
+}
+.conf-val { font-family: var(--mono); color: var(--accent); font-size: 12px; min-width: 32px; }
+
+/* ── Right panel ── */
+.right-panel {
+  background: var(--surface); border-left: 1px solid var(--border);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.label-list { flex: 1; overflow-y: auto; padding: 8px; }
+.label-item {
+  display: flex; align-items: center; gap: 8px; padding: 7px 10px;
+  border-radius: 6px; margin-bottom: 4px; border: 1px solid transparent;
+  cursor: pointer; transition: all .15s; group: true;
+}
+.label-item:hover { background: var(--panel); }
+.label-item.selected { border-color: var(--accent); background: rgba(79,142,247,.08); }
+.label-color { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+.label-text { flex: 1; font-size: 13px; }
+.label-conf { font-size: 10px; font-family: var(--mono); color: var(--muted); }
+.label-auto { font-size: 9px; padding: 1px 5px; border-radius: 3px; background: rgba(79,142,247,.15); color: var(--accent); }
+.label-del {
+  opacity: 0; width: 18px; height: 18px; border-radius: 4px; border: none;
+  background: rgba(255,92,106,.15); color: var(--red); cursor: pointer; font-size: 12px;
+  display: flex; align-items: center; justify-content: center; transition: opacity .15s;
+}
+.label-item:hover .label-del { opacity: 1; }
+
+.manual-add {
+  padding: 10px 12px; border-top: 1px solid var(--border);
+}
+.input-row { display: flex; gap: 6px; margin-bottom: 8px; }
+.tag-input {
+  flex: 1; background: var(--panel); border: 1px solid var(--border2);
+  color: var(--text); border-radius: 6px; padding: 7px 10px; font-size: 13px;
+  font-family: var(--sans); outline: none; transition: border .15s;
+}
+.tag-input:focus { border-color: var(--accent); }
+.tag-input::placeholder { color: var(--muted); }
+
+/* ── Buttons ── */
+.btn {
+  padding: 7px 14px; border-radius: 7px; border: none; cursor: pointer;
+  font-size: 13px; font-family: var(--sans); font-weight: 500;
+  display: flex; align-items: center; gap: 6px; transition: all .15s; white-space: nowrap;
+}
+.btn-primary { background: var(--accent); color: #fff; }
+.btn-primary:hover { background: #6a9ef8; }
+.btn-primary:disabled { opacity: .4; cursor: not-allowed; }
+.btn-success { background: var(--green); color: #0a1a12; }
+.btn-success:hover { background: #35f09e; }
+.btn-ghost { background: transparent; color: var(--muted); border: 1px solid var(--border2); }
+.btn-ghost:hover { color: var(--text); border-color: var(--border); }
+.btn-danger { background: rgba(255,92,106,.15); color: var(--red); border: 1px solid rgba(255,92,106,.25); }
+.btn-danger:hover { background: rgba(255,92,106,.25); }
+.btn-sm { padding: 5px 10px; font-size: 12px; }
+.btn-icon { padding: 7px; }
+
+.section-actions { padding: 10px 12px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 6px; }
+
+/* ── Export modal ── */
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,.7); z-index: 100;
+  display: flex; align-items: center; justify-content: center; backdrop-filter: blur(4px);
+  opacity: 0; pointer-events: none; transition: opacity .2s;
+}
+.modal-overlay.open { opacity: 1; pointer-events: all; }
+.modal {
+  background: var(--panel); border: 1px solid var(--border2); border-radius: 14px;
+  padding: 28px; width: 380px; box-shadow: 0 20px 60px rgba(0,0,0,.6);
+  transform: translateY(10px); transition: transform .2s;
+}
+.modal-overlay.open .modal { transform: translateY(0); }
+.modal h2 { font-size: 18px; margin-bottom: 6px; }
+.modal p { font-size: 13px; color: var(--muted); margin-bottom: 20px; }
+.format-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 20px; }
+.format-card {
+  padding: 14px 10px; border-radius: 8px; border: 1.5px solid var(--border2);
+  text-align: center; cursor: pointer; transition: all .15s;
+}
+.format-card:hover { border-color: var(--border); background: var(--surface); }
+.format-card.selected { border-color: var(--accent); background: rgba(79,142,247,.1); }
+.format-card .fmt-icon { font-size: 22px; margin-bottom: 6px; }
+.format-card .fmt-name { font-size: 13px; font-weight: 600; }
+.format-card .fmt-desc { font-size: 10px; color: var(--muted); margin-top: 3px; }
+.modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
+
+/* ── Toast ── */
+.toast {
+  position: fixed; bottom: 20px; right: 20px; background: var(--panel);
+  border: 1px solid var(--border2); border-radius: 8px; padding: 11px 16px;
+  font-size: 13px; z-index: 200; transform: translateY(60px); opacity: 0;
+  transition: all .3s; display: flex; align-items: center; gap: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.4);
+}
+.toast.show { transform: translateY(0); opacity: 1; }
+.toast.success { border-color: rgba(34,211,138,.3); }
+.toast.error   { border-color: rgba(255,92,106,.3); }
+
+/* ── Progress ── */
+.progress-bar {
+  position: fixed; top: 52px; left: 0; right: 0; height: 2px; z-index: 50;
+  background: transparent; overflow: hidden; pointer-events: none;
+}
+.progress-fill {
+  height: 100%; width: 0; background: linear-gradient(90deg, var(--accent), var(--green));
+  transition: width .3s; box-shadow: 0 0 8px var(--accent);
+}
+
+/* ── Empty states ── */
+.empty { display: flex; flex-direction: column; align-items: center; justify-content: center;
+         gap: 10px; height: 100%; color: var(--muted); text-align: center; padding: 20px; }
+.empty svg { opacity: .15; }
+.empty p { font-size: 13px; }
+
+/* ── Drawing cursor helper ── */
+.drawing-mode #main-canvas { cursor: crosshair; }
+
+/* Scrollbar for label list */
+.label-list::-webkit-scrollbar { width: 4px; }
+.label-list::-webkit-scrollbar-track { background: transparent; }
+.label-list::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+
+.status-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+.dot-green { background: var(--green); box-shadow: 0 0 6px var(--green); }
+.dot-yellow { background: var(--yellow); }
+</style>
+</head>
+<body>
+
+<div class="app">
+
+  <!-- Top bar -->
+  <header class="topbar">
+    <div class="logo">Auto<span>Label</span></div>
+    <div class="topbar-sep"></div>
+    <div class="topbar-stat"><b id="stat-images">0</b> images</div>
+    <div class="topbar-stat"><b id="stat-labels">0</b> labels</div>
+    <div class="topbar-stat"><b id="stat-classes">0</b> classes</div>
+    <div class="topbar-right">
+      <span class="status-dot dot-green" id="status-dot"></span>
+      <span id="status-text" style="font-size:12px;color:var(--muted)">Ready</span>
+      <div class="topbar-sep"></div>
+      <button class="btn btn-ghost btn-sm" onclick="openExport()">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Export Dataset
+      </button>
+    </div>
+  </header>
+
+  <div class="main">
+
+    <!-- Left: file list -->
+    <aside class="left-panel">
+      <div class="panel-header">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/></svg>
+        Images
+        <span style="margin-left:auto;font-family:var(--mono);font-size:10px" id="image-count">0</span>
+      </div>
+
+      <div class="upload-zone" id="upload-zone" onclick="document.getElementById('file-input').click()">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+        </svg>
+        <p><b>Click or drag</b> images here</p>
+        <p style="font-size:11px;margin-top:4px">JPG, PNG, WebP</p>
+      </div>
+      <input type="file" id="file-input" accept="image/*" multiple>
+
+      <div class="file-list" id="file-list">
+        <div class="empty">
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+          <p>No images yet</p>
+        </div>
+      </div>
+
+      <div style="padding:10px 12px;border-top:1px solid var(--border);display:flex;gap:6px">
+        <button class="btn btn-primary btn-sm" style="flex:1" id="auto-all-btn" onclick="autoLabelAll()" disabled>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="M8 12l3 3 5-5"/></svg>
+          Auto-Label All
+        </button>
+        <button class="btn btn-danger btn-sm btn-icon" onclick="clearAll()" title="Clear all">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+        </button>
+      </div>
+    </aside>
+
+    <!-- Center: canvas -->
+    <main class="canvas-area" id="canvas-area">
+      <div class="canvas-toolbar" id="canvas-toolbar">
+        <button class="tool-btn active" id="tool-select" onclick="setTool('select')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4l7 18 3-7 7-3z"/></svg> Select
+        </button>
+        <button class="tool-btn" id="tool-draw" onclick="setTool('draw')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="1"/></svg> Draw Box
+        </button>
+        <div style="width:1px;background:var(--border2);margin:3px 2px"></div>
+        <button class="btn btn-primary btn-sm" id="auto-btn" onclick="autoLabelCurrent()" disabled>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+          Auto-Label
+        </button>
+      </div>
+
+      <div id="canvas-placeholder" class="canvas-placeholder">
+        <svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="0.8">
+          <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>
+        </svg>
+        <p>Upload images to start labeling</p>
+      </div>
+
+      <div class="canvas-wrap" id="canvas-wrap" style="display:none">
+        <canvas id="main-canvas"></canvas>
+      </div>
+
+      <div class="conf-bar">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>
+        Confidence
+        <input type="range" id="conf-slider" min="10" max="90" value="35" oninput="updateConf(this.value)">
+        <span class="conf-val" id="conf-val">0.35</span>
+      </div>
+    </main>
+
+    <!-- Right: labels -->
+    <aside class="right-panel">
+      <div class="panel-header">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+        Labels
+        <span style="margin-left:auto;font-family:var(--mono);font-size:10px" id="label-count">0</span>
+      </div>
+
+      <div class="label-list" id="label-list">
+        <div class="empty" id="label-empty">
+          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><path d="M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+          <p>No labels yet.<br>Click Auto-Label or draw a box.</p>
+        </div>
+      </div>
+
+      <div class="manual-add">
+        <div style="font-size:11px;color:var(--muted);margin-bottom:8px;font-family:var(--mono);letter-spacing:1px;text-transform:uppercase">Add Label to Selection</div>
+        <div class="input-row">
+          <input type="text" class="tag-input" id="label-input" placeholder="e.g. dog, car, sign…" list="label-suggestions">
+          <datalist id="label-suggestions"></datalist>
+          <button class="btn btn-primary btn-sm" onclick="addManualLabel()">Add</button>
+        </div>
+        <div style="font-size:11px;color:var(--muted)">Draw a box first, then type a label name</div>
+      </div>
+
+      <div class="section-actions">
+        <button class="btn btn-ghost btn-sm" onclick="saveLabels()" id="save-btn" disabled>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+          Save Labels
+        </button>
+        <button class="btn btn-success btn-sm" onclick="openExport()">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Export Dataset
+        </button>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<!-- Progress bar -->
+<div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+
+<!-- Export modal -->
+<div class="modal-overlay" id="export-modal">
+  <div class="modal">
+    <h2>Export Dataset</h2>
+    <p>Choose the format for your labeled dataset download.</p>
+    <div class="format-grid">
+      <div class="format-card selected" data-fmt="yolo" onclick="selectFormat('yolo')">
+        <div class="fmt-icon">🎯</div>
+        <div class="fmt-name">YOLO</div>
+        <div class="fmt-desc">Darknet / Ultralytics</div>
+      </div>
+      <div class="format-card" data-fmt="coco" onclick="selectFormat('coco')">
+        <div class="fmt-icon">🔷</div>
+        <div class="fmt-name">COCO</div>
+        <div class="fmt-desc">JSON annotations</div>
+      </div>
+      <div class="format-card" data-fmt="csv" onclick="selectFormat('csv')">
+        <div class="fmt-icon">📊</div>
+        <div class="fmt-name">CSV</div>
+        <div class="fmt-desc">Spreadsheet / custom</div>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeExport()">Cancel</button>
+      <button class="btn btn-success" onclick="doExport()">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Download ZIP
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script>
+// ── State ────────────────────────────────────────────────────────────────────
+const state = {
+  images: [],           // [{id, filename, width, height}]
+  currentId: null,
+  labels: {},           // {img_id: [...]}
+  tool: 'select',
+  drawing: false,
+  drawStart: null,
+  drawCurrent: null,
+  selectedLabel: null,
+  pendingBox: null,     // box drawn, waiting for label name
+  scale: 1,
+  offsetX: 0,
+  offsetY: 0,
+  imgEl: null,
+  conf: 0.35,
+  exportFmt: 'yolo',
+};
+
+const COLORS = [
+  '#4f8ef7','#22d38a','#f5c842','#ff5c6a','#c678dd',
+  '#56b6c2','#e5c07b','#98c379','#abb2bf','#61afef',
+  '#ff79c6','#50fa7b','#ffb86c','#bd93f9','#ff5555',
+];
+const classColors = {};
+function colorFor(label) {
+  if (!classColors[label]) {
+    classColors[label] = COLORS[Object.keys(classColors).length % COLORS.length];
+  }
+  return classColors[label];
+}
+
+// ── Canvas ───────────────────────────────────────────────────────────────────
+const canvas = document.getElementById('main-canvas');
+const ctx = canvas.getContext('2d');
+let canvasImg = null;
+
+function setTool(t) {
+  state.tool = t;
+  document.querySelectorAll('.tool-btn[id^="tool-"]').forEach(b => b.classList.remove('active'));
+  document.getElementById('tool-' + t).classList.add('active');
+  canvas.style.cursor = t === 'draw' ? 'crosshair' : 'default';
+}
+
+function canvasCoords(e) {
+  const rect = canvas.getBoundingClientRect();
+  return { x: (e.clientX - rect.left) / state.scale, y: (e.clientY - rect.top) / state.scale };
+}
+
+canvas.addEventListener('mousedown', e => {
+  if (!state.currentId) return;
+  const pos = canvasCoords(e);
+  if (state.tool === 'draw') {
+    state.drawing = true;
+    state.drawStart = pos;
+    state.drawCurrent = pos;
+    state.pendingBox = null;
+  } else {
+    // select
+    const labels = state.labels[state.currentId] || [];
+    const entry = state.images.find(i => i.id === state.currentId);
+    let hit = null;
+    for (let i = labels.length - 1; i >= 0; i--) {
+      const lb = labels[i];
+      const x = lb.x * entry.width, y = lb.y * entry.height;
+      const w = lb.w * entry.width, h = lb.h * entry.height;
+      if (pos.x >= x && pos.x <= x + w && pos.y >= y && pos.y <= y + h) { hit = lb; break; }
+    }
+    state.selectedLabel = hit ? hit.id : null;
+    render();
+  }
+});
+
+canvas.addEventListener('mousemove', e => {
+  if (!state.drawing) return;
+  state.drawCurrent = canvasCoords(e);
+  render();
+});
+
+canvas.addEventListener('mouseup', e => {
+  if (!state.drawing) return;
+  state.drawing = false;
+  const s = state.drawStart, c = state.drawCurrent;
+  const entry = state.images.find(i => i.id === state.currentId);
+  if (!entry) return;
+  const x = Math.min(s.x, c.x), y = Math.min(s.y, c.y);
+  const w = Math.abs(s.x - c.x), h = Math.abs(s.y - c.y);
+  if (w < 5 || h < 5) return;
+  state.pendingBox = { x: x/entry.width, y: y/entry.height, w: w/entry.width, h: h/entry.height };
+  render();
+  document.getElementById('label-input').focus();
+  showToast('Box drawn — type a label and click Add', 'info');
+});
+
+function render() {
+  if (!canvasImg || !state.currentId) return;
+  const entry = state.images.find(i => i.id === state.currentId);
+  if (!entry) return;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(canvasImg, 0, 0, entry.width, entry.height);
+  const labels = state.labels[state.currentId] || [];
+  labels.forEach(lb => {
+    const x = lb.x * entry.width, y = lb.y * entry.height;
+    const w = lb.w * entry.width, h = lb.h * entry.height;
+    const col = colorFor(lb.label);
+    const isSelected = lb.id === state.selectedLabel;
+    ctx.strokeStyle = col;
+    ctx.lineWidth = isSelected ? 2.5 : 1.5;
+    ctx.strokeRect(x, y, w, h);
+    ctx.fillStyle = col + '28';
+    ctx.fillRect(x, y, w, h);
+    // label tag
+    ctx.font = 'bold 11px Space Mono, monospace';
+    const txt = lb.label + (lb.confidence ? ` ${(lb.confidence*100).toFixed(0)}%` : '');
+    const tw = ctx.measureText(txt).width + 8;
+    ctx.fillStyle = col;
+    ctx.fillRect(x, y - 17, tw, 17);
+    ctx.fillStyle = '#fff';
+    ctx.fillText(txt, x + 4, y - 4);
+    if (isSelected) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.strokeRect(x, y, w, h); }
+  });
+  // pending box
+  if (state.pendingBox) {
+    const lb = state.pendingBox;
+    const x = lb.x * entry.width, y = lb.y * entry.height;
+    const w = lb.w * entry.width, h = lb.h * entry.height;
+    ctx.strokeStyle = '#f5c842'; ctx.lineWidth = 2; ctx.setLineDash([5, 3]);
+    ctx.strokeRect(x, y, w, h); ctx.setLineDash([]);
+    ctx.fillStyle = 'rgba(245,200,66,.1)'; ctx.fillRect(x, y, w, h);
+  }
+  // drawing in progress
+  if (state.drawing && state.drawStart) {
+    const s = state.drawStart, c = state.drawCurrent || s;
+    const x = Math.min(s.x,c.x), y = Math.min(s.y,c.y);
+    const w = Math.abs(s.x-c.x), h = Math.abs(s.y-c.y);
+    ctx.strokeStyle = '#4f8ef7'; ctx.lineWidth = 1.5; ctx.setLineDash([4,2]);
+    ctx.strokeRect(x, y, w, h); ctx.setLineDash([]);
+    ctx.fillStyle = 'rgba(79,142,247,.08)'; ctx.fillRect(x, y, w, h);
+  }
+  updateLabelList();
+}
+
+// ── Load image onto canvas ────────────────────────────────────────────────────
+async function loadImageToCanvas(imgId) {
+  setStatus('Loading…', false);
+  const res = await fetch(`/api/image/${imgId}`);
+  const data = await res.json();
+  const entry = state.images.find(i => i.id === imgId);
+  entry.width = data.width; entry.height = data.height;
+
+  const MAX = { w: window.innerWidth - 560, h: window.innerHeight - 110 };
+  state.scale = Math.min(1, MAX.w / data.width, MAX.h / data.height);
+  const dw = Math.round(data.width * state.scale);
+  const dh = Math.round(data.height * state.scale);
+  canvas.width = data.width; canvas.height = data.height;
+  canvas.style.width = dw + 'px'; canvas.style.height = dh + 'px';
+
+  canvasImg = new Image();
+  canvasImg.src = data.image;
+  canvasImg.onload = () => { render(); setStatus('Ready'); };
+
+  document.getElementById('canvas-placeholder').style.display = 'none';
+  document.getElementById('canvas-wrap').style.display = 'block';
+  document.getElementById('auto-btn').disabled = false;
+  document.getElementById('save-btn').disabled = false;
+}
+
+// ── File list ─────────────────────────────────────────────────────────────────
+function renderFileList() {
+  const el = document.getElementById('file-list');
+  if (!state.images.length) {
+    el.innerHTML = `<div class="empty"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg><p>No images yet</p></div>`;
+    return;
+  }
+  el.innerHTML = state.images.map(img => {
+    const lbls = state.labels[img.id] || [];
+    const active = img.id === state.currentId ? 'active' : '';
+    return `<div class="file-item ${active}" onclick="selectImage('${img.id}')">
+      <div class="file-thumb" style="background:var(--border2)"></div>
+      <div class="file-info">
+        <div class="file-name">${img.filename}</div>
+        <div class="file-meta">${img.width||'?'}×${img.height||'?'}</div>
+      </div>
+      <span class="label-badge ${lbls.length?'':'zero'}">${lbls.length}</span>
+    </div>`;
+  }).join('');
+  document.getElementById('image-count').textContent = state.images.length;
+  document.getElementById('auto-all-btn').disabled = !state.images.length;
+}
+
+function updateLabelList() {
+  if (!state.currentId) return;
+  const labels = state.labels[state.currentId] || [];
+  const el = document.getElementById('label-list');
+  const emptyEl = document.getElementById('label-empty');
+  document.getElementById('label-count').textContent = labels.length;
+  if (!labels.length) {
+    el.innerHTML = '';
+    el.appendChild(emptyEl);
+    emptyEl.style.display = '';
+    return;
+  }
+  emptyEl.style.display = 'none';
+  el.innerHTML = labels.map(lb => {
+    const col = colorFor(lb.label);
+    const isSelected = lb.id === state.selectedLabel ? 'selected' : '';
+    return `<div class="label-item ${isSelected}" onclick="selectLabelItem('${lb.id}')">
+      <div class="label-color" style="background:${col}"></div>
+      <div class="label-text">${lb.label}</div>
+      ${lb.confidence ? `<span class="label-conf">${(lb.confidence*100).toFixed(0)}%</span>` : ''}
+      ${lb.auto ? `<span class="label-auto">AUTO</span>` : ''}
+      <button class="label-del" onclick="event.stopPropagation();deleteLabel('${lb.id}')">✕</button>
+    </div>`;
+  }).join('');
+  // update suggestions
+  const all = new Set(); Object.values(state.labels).forEach(arr => arr.forEach(lb => all.add(lb.label)));
+  document.getElementById('label-suggestions').innerHTML = [...all].map(l=>`<option value="${l}">`).join('');
+  updateStats();
+}
+
+function selectLabelItem(id) {
+  state.selectedLabel = id; state.pendingBox = null; render();
+}
+
+function deleteLabel(id) {
+  if (!state.currentId) return;
+  state.labels[state.currentId] = (state.labels[state.currentId]||[]).filter(l=>l.id!==id);
+  if (state.selectedLabel === id) state.selectedLabel = null;
+  render(); renderFileList();
+}
+
+// ── Image selection ───────────────────────────────────────────────────────────
+async function selectImage(id) {
+  if (state.currentId === id) return;
+  state.currentId = id; state.selectedLabel = null; state.pendingBox = null;
+  renderFileList();
+  if (!state.labels[id]) {
+    const res = await fetch(`/api/labels/${id}`);
+    const data = await res.json();
+    state.labels[id] = data.labels || [];
+  }
+  await loadImageToCanvas(id);
+}
+
+// ── Upload ────────────────────────────────────────────────────────────────────
+document.getElementById('file-input').addEventListener('change', async e => {
+  await uploadFiles(e.target.files);
+  e.target.value = '';
+});
+
+const zone = document.getElementById('upload-zone');
+zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag'); });
+zone.addEventListener('dragleave', () => zone.classList.remove('drag'));
+zone.addEventListener('drop', async e => {
+  e.preventDefault(); zone.classList.remove('drag');
+  await uploadFiles(e.dataTransfer.files);
+});
+
+async function uploadFiles(files) {
+  if (!files.length) return;
+  const fd = new FormData();
+  [...files].forEach(f => fd.append('images', f));
+  setStatus('Uploading…', false);
+  progress(20);
+  const res = await fetch('/api/upload', { method:'POST', body:fd });
+  const data = await res.json();
+  progress(100);
+  data.uploaded.forEach(img => { state.images.push(img); state.labels[img.id] = []; });
+  renderFileList();
+  if (!state.currentId && data.uploaded.length) selectImage(data.uploaded[0].id);
+  showToast(`Uploaded ${data.uploaded.length} image(s)`, 'success');
+  setStatus('Ready');
+  setTimeout(()=>progress(0), 400);
+}
+
+// ── Auto label ────────────────────────────────────────────────────────────────
+async function autoLabelCurrent() {
+  if (!state.currentId) return;
+  setStatus('Running YOLOv8…', false);
+  const btn = document.getElementById('auto-btn');
+  btn.disabled = true; btn.textContent = 'Detecting…';
+  progress(30);
+  const res = await fetch(`/api/autolabel/${state.currentId}`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({confidence: state.conf})
+  });
+  const data = await res.json();
+  state.labels[state.currentId] = data.labels;
+  progress(100);
+  render(); renderFileList();
+  showToast(`Found ${data.count} object(s) automatically`, 'success');
+  setStatus('Ready');
+  btn.disabled = false;
+  btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg> Auto-Label`;
+  setTimeout(()=>progress(0), 400);
+}
+
+async function autoLabelAll() {
+  const total = state.images.length;
+  for (let i=0; i<total; i++) {
+    const img = state.images[i];
+    setStatus(`Auto-labeling ${i+1}/${total}…`, false);
+    progress(Math.round((i/total)*90));
+    const res = await fetch(`/api/autolabel/${img.id}`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({confidence: state.conf})
+    });
+    const data = await res.json();
+    state.labels[img.id] = data.labels;
+  }
+  if (state.currentId) render();
+  renderFileList(); progress(100);
+  showToast(`Auto-labeled all ${total} images`, 'success');
+  setStatus('Ready'); setTimeout(()=>progress(0), 400);
+}
+
+// ── Manual label ──────────────────────────────────────────────────────────────
+function addManualLabel() {
+  const name = document.getElementById('label-input').value.trim();
+  if (!name) { showToast('Enter a label name first', 'error'); return; }
+  if (!state.currentId) { showToast('Select an image first', 'error'); return; }
+  if (!state.pendingBox && !state.selectedLabel) { showToast('Draw a bounding box first', 'error'); return; }
+  if (state.pendingBox) {
+    const newLabel = { id: Date.now().toString(36), label: name, ...state.pendingBox, auto: false };
+    state.labels[state.currentId] = [...(state.labels[state.currentId]||[]), newLabel];
+    state.pendingBox = null;
+    document.getElementById('label-input').value = '';
+    render(); renderFileList();
+    showToast(`Added label: ${name}`, 'success');
+  } else if (state.selectedLabel) {
+    const labels = state.labels[state.currentId] || [];
+    const lb = labels.find(l=>l.id===state.selectedLabel);
+    if (lb) { lb.label = name; render(); }
+    document.getElementById('label-input').value = '';
+  }
+}
+
+document.getElementById('label-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') addManualLabel();
+});
+
+// ── Save labels ───────────────────────────────────────────────────────────────
+async function saveLabels() {
+  if (!state.currentId) return;
+  await fetch(`/api/labels/${state.currentId}`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({labels: state.labels[state.currentId]||[]})
+  });
+  showToast('Labels saved', 'success');
+}
+
+// ── Export ────────────────────────────────────────────────────────────────────
+function openExport() { document.getElementById('export-modal').classList.add('open'); }
+function closeExport() { document.getElementById('export-modal').classList.remove('open'); }
+function selectFormat(fmt) {
+  state.exportFmt = fmt;
+  document.querySelectorAll('.format-card').forEach(c => c.classList.toggle('selected', c.dataset.fmt===fmt));
+}
+async function doExport() {
+  closeExport();
+  // save all first
+  for (const id of state.images.map(i=>i.id)) {
+    await fetch(`/api/labels/${id}`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({labels: state.labels[id]||[]})
+    });
+  }
+  setStatus('Preparing export…', false); progress(40);
+  const res = await fetch('/api/export', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({format: state.exportFmt})
+  });
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `dataset_${state.exportFmt}.zip`; a.click();
+  URL.revokeObjectURL(url);
+  progress(100); setStatus('Ready');
+  showToast(`Dataset exported as ${state.exportFmt.toUpperCase()}`, 'success');
+  setTimeout(()=>progress(0), 400);
+}
+
+// ── Clear all ─────────────────────────────────────────────────────────────────
+async function clearAll() {
+  if (!confirm('Clear all images and labels?')) return;
+  await fetch('/api/clear', {method:'POST'});
+  state.images=[]; state.labels={}; state.currentId=null;
+  canvasImg=null; state.selectedLabel=null; state.pendingBox=null;
+  canvas.width=1; canvas.height=1;
+  document.getElementById('canvas-placeholder').style.display='';
+  document.getElementById('canvas-wrap').style.display='none';
+  document.getElementById('auto-btn').disabled=true;
+  document.getElementById('save-btn').disabled=true;
+  renderFileList(); updateLabelList(); updateStats();
+  showToast('Cleared all data', 'info');
+}
+
+// ── Stats ─────────────────────────────────────────────────────────────────────
+function updateStats() {
+  const totalLabels = Object.values(state.labels).reduce((s,a)=>s+a.length,0);
+  const allClasses = new Set();
+  Object.values(state.labels).forEach(a=>a.forEach(l=>allClasses.add(l.label)));
+  document.getElementById('stat-images').textContent = state.images.length;
+  document.getElementById('stat-labels').textContent = totalLabels;
+  document.getElementById('stat-classes').textContent = allClasses.size;
+}
+
+// ── Confidence slider ─────────────────────────────────────────────────────────
+function updateConf(v) {
+  state.conf = v/100;
+  document.getElementById('conf-val').textContent = state.conf.toFixed(2);
+}
+
+// ── Status / toast / progress ─────────────────────────────────────────────────
+function setStatus(msg, ready=true) {
+  document.getElementById('status-text').textContent = msg;
+  const dot = document.getElementById('status-dot');
+  dot.className = 'status-dot ' + (ready ? 'dot-green' : 'dot-yellow');
+}
+function progress(pct) {
+  document.getElementById('progress-fill').style.width = pct + '%';
+}
+let _toastTimer;
+function showToast(msg, type='info') {
+  const el = document.getElementById('toast');
+  const icons = {success:'✓', error:'✕', info:'ℹ'};
+  el.innerHTML = `<span>${icons[type]||'ℹ'}</span> ${msg}`;
+  el.className = `toast show ${type}`;
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(()=>el.classList.remove('show'), 3000);
+}
+
+// ── Keyboard shortcuts ────────────────────────────────────────────────────────
+document.addEventListener('keydown', e => {
+  if (e.target.tagName==='INPUT') return;
+  if (e.key==='d'||e.key==='D') setTool('draw');
+  if (e.key==='s'||e.key==='S') setTool('select');
+  if (e.key==='Delete'||e.key==='Backspace') {
+    if (state.selectedLabel && state.currentId) deleteLabel(state.selectedLabel);
+  }
+  if (e.key==='ArrowRight'||e.key==='ArrowDown') {
+    const idx = state.images.findIndex(i=>i.id===state.currentId);
+    if (idx < state.images.length-1) selectImage(state.images[idx+1].id);
+  }
+  if (e.key==='ArrowLeft'||e.key==='ArrowUp') {
+    const idx = state.images.findIndex(i=>i.id===state.currentId);
+    if (idx > 0) selectImage(state.images[idx-1].id);
+  }
+});
+
+// init
+updateStats();
+</script>
+</body>
+</html>
